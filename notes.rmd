@@ -1,0 +1,153 @@
+---
+title: "Dynamical Complex Network Notebook"
+author: "Xue, Leyang"
+date: "Octorber 21, 2019"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(warn=-1)
+```
+
+## Preparation
+
+```{r load.data}
+library('igraph')
+library('ggplot2')
+library('reshape2')
+library(seriation)
+library(factoextra)
+library(tidyverse)  # data manipulation
+library(cluster)
+filenames = list.files("graphml", pattern="*.graphml", full.names=TRUE)
+list.graph = lapply(filenames, read_graph, format=c("graphml"))
+sample.graph = read_graph("graphml\\March 2015.graphml", format=c("graphml"))
+country.data = read.csv("country-unique.csv", header=TRUE)
+```
+
+## Quantity
+
+```{r laplacian}
+library('Matrix')
+
+Phi = function(Ls, t) {
+  in.deg = degree(sample.graph,mode=c("in"))
+  total.deg = degree(sample.graph,mode=c("total"))
+  out.deg = degree(sample.graph,mode=c("out"))
+  len = length(total.deg)
+  #m = matrix(in.deg, 1, len)
+  m = strength(sample.graph, mode=c("all"))
+  scale = diag(len)+(m %*% t(m))/length(country.data$id)
+  e = expm(-Ls*t)
+  result = e %*% scale %*% t(e)
+  #result = e %*% t(e)
+  #result[is.na(result)] = 0
+  result
+}
+
+DistM = function(Ls, t) {
+  e = eigen(Phi(Ls,t), only.values=TRUE)
+  evals = e$values
+  #evecs = e$vectors
+  len = length(evals)
+  distm = matrix(NA, len, len)
+  for (i in seq(1,len)) {
+    for (j in seq(1,len)) {
+      distm[i,j] = sqrt(sum((sqrt(evals)*(exp(-evals[i]*t)-exp(-evals[j]*t)))^2))
+    }
+  }
+  #print(distm)
+  distm
+}
+
+HM = function(Ls, t) {
+  phi = as.matrix(Phi(Ls,t))
+  names = as.integer(colnames(phi))
+  new.names = character(length(names))
+  for (i in seq(1,length(names))) {
+    new.names[i] = as.character(country.data$text[which(country.data$id == names[i])])
+  }
+
+  colnames(phi) = new.names
+  rownames(phi) = new.names
+
+  
+  r = eigen(phi)
+  V = r$vectors
+  lam = r$values
+  phi.i = t(t(V)*sqrt(lam))
+  
+  phi1 = phi.i[,1]
+  phi2 = phi.i[,2]
+  
+  df = data.frame(x=phi1,y=phi2)
+  rownames(df) = new.names
+  df.dist = dist(df)
+  
+  cl = kmeans(df, 8)
+  clusplot(df,cl$cluster, color=TRUE, shade=TRUE, 
+         labels=.2, lines=0)
+  
+  val <- phi1 + phi2
+  valcol <- (val + abs(min(val)))/max(val + abs(min(val)))
+  plot(phi1, phi2, pch = 15, col=gray(valcol, 0.7), xlim=c(min(phi1),max(phi1)), ylim=c(min(phi2),max(phi2)))
+  text(phi1, phi2, labels=new.names, cex=0.2, font=1)
+  
+  #phi = (phi-min(phi)) / (max(phi)-min(phi))
+  
+  #col.rm = integer()
+  #row.rm = integer()
+  #for (i in 1:length(new.names)) {
+  #  if (mean(phi[,i]) < 10^(-5)) col.rm = c(col.rm, i)
+  #  if (mean(phi[i,]) < 10^(-5)) row.rm = c(row.rm, i)
+  #}
+  #phi = phi[-row.rm,-col.rm]
+  
+  #d = diag(phi)
+  #idx = order(d)
+  #phi = phi[idx,][,idx]
+  
+  set.seed(2)
+  longData<-melt(phi)
+  o <- seriate(phi, method="BEA_TSP")
+
+  #with the same longData then earlier
+  longData$Var1 <- factor(longData$Var1, levels=names(unlist(o[[1]][]))) 
+  longData$Var2 <- factor(longData$Var2, levels=names(unlist(o[[2]][])))
+  #levels must be names
+
+  ggplot(longData, aes(x = Var2, y = Var1)) + 
+  geom_raster(aes(fill=value)) + 
+  scale_fill_gradient(low="grey90", high="red") +
+  labs(x="letters", y="LETTERS", title="Matrix") +
+  theme_bw() + 
+  theme(text = element_text(size=2),axis.text.x = element_text(angle=90, hjust=1))
+  
+  #print(phi[1,nrow(phi)])
+  #print(phi[1,1])
+  #phi = phi / max(phi) * 2 - 1
+  #heatmap(phi, cexRow = .1, cexCol = .1, col=paste("gray",1:99,sep=""),keep.dendro = TRUE, main=paste("lag", toString(t), sep=" "))
+  #ggplot(data = melt(phi), aes(x=Var1, y=Var2, fill=value), main=paste("lag", toString(t), sep=" "), cexRow = .1, cexCol = .1) + 
+  #geom_tile() +
+  #theme(text = element_text(size=2),
+  #      axis.text.x = element_text(angle=90, hjust=1))  +
+  #scale_fill_gradient2(low = "blue", high = "red", mid = "white")  
+}
+
+Ls = laplacian_matrix(sample.graph,sparse = FALSE)
+Ls[is.na(Ls)] = 0
+
+HM(Ls, 1/1000)
+HM(Ls, 4/1000)
+HM(Ls, 8/1000)
+HM(Ls, 16/1000)
+HM(Ls, 32/1000)
+HM(Ls, 64/1000)
+HM(Ls, 128/1000)
+HM(Ls, 256/1000)
+HM(Ls, 512/1000)
+```
